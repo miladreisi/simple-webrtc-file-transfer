@@ -23,7 +23,8 @@ jQuery(document).ready($ => {
       return;
     }
 
-    socket = io("https://192.168.1.189:3000", {
+    let host = window.location.origin;
+    socket = io(host, {
       rejectUnauthorized: false
     });
     socket.on("connect", () => {
