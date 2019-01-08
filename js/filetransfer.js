@@ -6,7 +6,13 @@ let socketConnected = false;
 let sendDataChannelOpen = false;
 let username = null;
 let peerUsername = null;
-
+const delayBetweenEachChunSending = 1 // ms
+const eachChunkSizeForSendingFile = 1024 * 100 //  1280 is prefered
+const DATA_CHANNEL_MAX_BUFFER_SIZE = 16 * 1024 * 1000 // 16 MB
+const WAITING_TIME_FOR_DATA_CHANNEL_TO_BE_READY = 1000 // 1 Second
+const DATA_CHANNEL_MIN_BUFFER_THRESHOLD = 5 * 1024 * 1000; // 5MB
+const DATA_CHANNEL_MAX_BUFFER_THRESHOLD = 10 * 1024 * 1000; // 10MB
+let canSendDataOverDataChannel = false;
 let receivedFileData = [];
 let receivedFileMetaData = {
   name: null,
@@ -62,7 +68,7 @@ jQuery(document).ready($ => {
     });
   });
 
-  $("#connectToPeerBtn").click(function() {
+  $("#connectToPeerBtn").click(function () {
     initLocalConnection();
 
     localConnection.createOffer().then(offer => {
@@ -96,8 +102,10 @@ jQuery(document).ready($ => {
     }
 
     let fileToSend = fileInput.files[0];
-    displayMsg("Sending...");
-    let eachChunkSize = 102400;
+    let startTime = performance.now();
+    let endTime = null;
+
+    let eachChunkSize = eachChunkSizeForSendingFile;
     let numberOfChunks = parseInt(fileToSend.size / eachChunkSize) + 1;
     sendDataChannel.send(
       JSON.stringify({
@@ -109,30 +117,67 @@ jQuery(document).ready($ => {
     );
 
     let numberOfSentChunks = 0;
-    for (let start = 0; start <= fileToSend.size; start += eachChunkSize) {
-      let fileReader = new FileReader();
-      fileReader.onloadend = event => {
-        console.log("onloaded");
-        if (event.target.readyState == FileReader.DONE) {
-          console.log(`from ${start} to ${start + eachChunkSize} loaded`);
-          let chunkNumber = start / eachChunkSize;
-          displayMsg(`Sending chunk ${chunkNumber} of ${numberOfChunks}`);
-          sendDataChannel.send(event.target.result);
-          numberOfSentChunks++;
-          if (numberOfSentChunks == numberOfChunks) {
-            displayMsg("File Sent Successfully");
-          }
-        }
-      };
 
-      let end = start + eachChunkSize;
-      if (end > fileToSend.size) {
-        end = fileToSend.size + 1; // reading last byte
-      }
-      let chunk = fileToSend.slice(start, end);
-      fileReader.readAsArrayBuffer(chunk);
+    let start = 0;
+    let fileReader = new FileReader();
+
+    let end = start + eachChunkSize;
+    if (end > fileToSend.size) {
+      end = fileToSend.size + 1; // reading last byte
     }
+    let chunk = fileToSend.slice(start, end);
+    fileReader.readAsArrayBuffer(chunk);
+
+    sendDataChannel.onbufferedamountlow = (event) => {
+      console.log(`onbufferedamountlow`);
+      console.log(event);
+    }
+
+    fileReader.onloadend = event => {
+      console.log("onloaded");
+      if (event.target.readyState == FileReader.DONE) {
+        console.log(`from ${start} to ${start + eachChunkSize} loaded`);
+        let chunkNumber = start / eachChunkSize;
+        let dataToSend = event.target.result;
+        let successCallback = () => {
+          start += eachChunkSize;
+          if (start > fileToSend.size) {
+            $('#sendDataChannelStatusTxt').text("File Sent Successfully");
+            endTime = performance.now();
+            let tokenTime = (endTime - startTime) / 1000;
+            displayMsg(`Time Token For Sending File: ${tokenTime} Second, File Size: ${fileToSend.size / 1024} KB, Speed: ${(fileToSend.size / 1024)/tokenTime} KB/S`)
+            return;
+          }
+          let end = start + eachChunkSize;
+          if (end > fileToSend.size) {
+            end = fileToSend.size + 1; // reading last byte
+          }
+          let chunk = fileToSend.slice(start, end);
+          fileReader.readAsArrayBuffer(chunk);
+        };
+
+        // displayMsg(`Sending chunk ${chunkNumber} of ${numberOfChunks}`);
+        $('#chunkNumberTxt').html(`Sent chunks: ${chunkNumber + 1}/${numberOfChunks}`)
+        setTimeout(() => {
+          sendFileChunk(dataToSend, successCallback);
+        }, delayBetweenEachChunSending);
+      }
+    };
   });
+
+  function sendFileChunk(chunk, successCallback) {
+    if (sendDataChannel.bufferedAmount > DATA_CHANNEL_MAX_BUFFER_THRESHOLD) {
+      $('#sendDataChannelStatusTxt').text('DataChannel Buffer Is Full, Waiting...');
+      setTimeout(() => {
+        sendFileChunk(chunk, successCallback);
+      }, WAITING_TIME_FOR_DATA_CHANNEL_TO_BE_READY);
+      return;
+    }
+    $('#sendDataChannelStatusTxt').text('Sending...');
+    sendDataChannel.send(chunk);
+    successCallback();
+
+  }
 
   function displayMsg(msg) {
     $("#resultTxt").append(`<span style='color:green'>${msg}</span><br/>`);
@@ -184,11 +229,14 @@ jQuery(document).ready($ => {
   function sendDataChannelOpenCallback(event) {
     console.log("sendDataChannel open event");
     sendDataChannelOpen = true;
+    canSendDataOverDataChannel = true;
   }
 
   function sendDataChannelCloseCallback(event) {
     console.log("sendDataChannel close event");
+    console.log(event);
     sendDataChannelOpen = false;
+    canSendDataOverDataChannel = false;
   }
 
   function initLocalConnection() {
@@ -197,17 +245,19 @@ jQuery(document).ready($ => {
     }
 
     localConnection = new RTCPeerConnection({
-      iceServers: [
-        {
-          urls: "stun:stun.l.google.com:19302"
-        }
-      ]
+      iceServers: [{
+        urls: "stun:stun.l.google.com:19302"
+      }]
     });
 
     localConnection.ondatachannel = receiveDatachannelCreatedCallback;
     sendDataChannel = localConnection.createDataChannel("myDataChannel");
     sendDataChannel.onopen = sendDataChannelOpenCallback;
     sendDataChannel.onclose = sendDataChannelCloseCallback;
+    // sendDataChannel.bufferedAmountLowThreshold = DATA_CHANNEL_MIN_BUFFER_THRESHOLD;
+    sendDataChannel.onbufferedamountlow = () => {
+      console.log('low buffer')
+    }
 
     localConnection.onicecandidate = e => {
       if (e.candidate) {
@@ -234,17 +284,22 @@ jQuery(document).ready($ => {
     };
   }
 
+  let receivingStartTime = null;
+  let receivingEndTime = null;
+
   function handleReceivedFile(fileData) {
     try {
       let data = JSON.parse(fileData);
+      receivingStartTime = performance.now();
       receivedFileMetaData = data;
     } catch (itsNotJson) {
       receivedFileData.push(fileData);
-      displayMsg(
-        `Received chunk ${receivedFileData.length} of ${
-          receivedFileMetaData.numberOfChunks
-        }`
-      );
+      // displayMsg(
+      //   `Received chunk ${receivedFileData.length} of ${
+      //     receivedFileMetaData.numberOfChunks
+      //   }`
+      // );
+      $('#chunkNumberTxt').html(`Received chunks: ${receivedFileData.length}/${receivedFileMetaData.numberOfChunks}`)
       if (receivedFileData.length == receivedFileMetaData.numberOfChunks) {
         fileReceiveEnded();
       }
@@ -252,6 +307,9 @@ jQuery(document).ready($ => {
   }
 
   function fileReceiveEnded() {
+    receivingEndTime = performance.now();
+    let tokenTime = (receivingEndTime - receivingStartTime) / 1000;
+    displayMsg(`Time Token For Receving File: ${tokenTime} Second, File Size: ${receivedFileMetaData.size/1024} KB, Speed: ${(receivedFileMetaData.size / 1024)/tokenTime} KB/S`)
     let fileBlob = new Blob(receivedFileData, {
       type: receivedFileMetaData.type
     });
@@ -261,6 +319,7 @@ jQuery(document).ready($ => {
     linkToDownload.innerText =
       "Click Here To Download " + receivedFileMetaData.name;
     $("#resultTxt").append(linkToDownload);
+    $("#resultTxt").append('<br/>');
 
     receivedFileMetaData = {};
     receivedFileData = [];
