@@ -2,5 +2,5 @@
 
 For Runnning
 ```bash
-npm install mongodb --save
+node filetransfer-server.js
 ```
