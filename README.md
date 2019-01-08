@@ -2,5 +2,6 @@
 
 For Runnning
 ```bash
+cd server
 node filetransfer-server.js
 ```
