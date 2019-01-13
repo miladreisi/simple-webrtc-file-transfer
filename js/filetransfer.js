@@ -6,14 +6,15 @@ let socketConnected = false;
 let sendDataChannelOpen = false;
 let username = null;
 let peerUsername = null;
-const delayBetweenEachChunSending = 1 // ms
-const eachChunkSizeForSendingFile = 1024 * 100 //  1280 is prefered
-const DATA_CHANNEL_MAX_BUFFER_SIZE = 16 * 1024 * 1000 // 16 MB
-const WAITING_TIME_FOR_DATA_CHANNEL_TO_BE_READY = 1000 // 1 Second
+const delayBetweenEachChunSending = 1; // ms
+const eachChunkSizeForSendingFile = 1024 * 100; //  1280 is prefered
+const DATA_CHANNEL_MAX_BUFFER_SIZE = 16 * 1024 * 1000; // 16 MB
+const WAITING_TIME_FOR_DATA_CHANNEL_TO_BE_READY = 1000; // 1 Second
 const DATA_CHANNEL_MIN_BUFFER_THRESHOLD = 5 * 1024 * 1000; // 5MB
 const DATA_CHANNEL_MAX_BUFFER_THRESHOLD = 10 * 1024 * 1000; // 10MB
 let canSendDataOverDataChannel = false;
 let receivedFileData = [];
+let receivedBytes = 0;
 let receivedFileMetaData = {
   name: null,
   size: null,
@@ -68,7 +69,7 @@ jQuery(document).ready($ => {
     });
   });
 
-  $("#connectToPeerBtn").click(function () {
+  $("#connectToPeerBtn").click(function() {
     initLocalConnection();
 
     localConnection.createOffer().then(offer => {
@@ -128,10 +129,10 @@ jQuery(document).ready($ => {
     let chunk = fileToSend.slice(start, end);
     fileReader.readAsArrayBuffer(chunk);
 
-    sendDataChannel.onbufferedamountlow = (event) => {
+    sendDataChannel.onbufferedamountlow = event => {
       console.log(`onbufferedamountlow`);
       console.log(event);
-    }
+    };
 
     fileReader.onloadend = event => {
       console.log("onloaded");
@@ -142,10 +143,13 @@ jQuery(document).ready($ => {
         let successCallback = () => {
           start += eachChunkSize;
           if (start > fileToSend.size) {
-            $('#sendDataChannelStatusTxt').text("File Sent Successfully");
+            $("#sendDataChannelStatusTxt").text("File Sent Successfully");
             endTime = performance.now();
             let tokenTime = (endTime - startTime) / 1000;
-            displayMsg(`Time Token For Sending File: ${tokenTime} Second, File Size: ${fileToSend.size / 1024} KB, Speed: ${(fileToSend.size / 1024)/tokenTime} KB/S`)
+            displayMsg(
+              `Time Token For Sending File: ${tokenTime} Second, File Size: ${fileToSend.size /
+                1024} KB, Speed: ${fileToSend.size / 1024 / tokenTime} KB/S`
+            );
             return;
           }
           let end = start + eachChunkSize;
@@ -157,7 +161,9 @@ jQuery(document).ready($ => {
         };
 
         // displayMsg(`Sending chunk ${chunkNumber} of ${numberOfChunks}`);
-        $('#chunkNumberTxt').html(`Sent chunks: ${chunkNumber + 1}/${numberOfChunks}`)
+        $("#chunkNumberTxt").html(
+          `Sent chunks: ${chunkNumber + 1}/${numberOfChunks}`
+        );
         setTimeout(() => {
           sendFileChunk(dataToSend, successCallback);
         }, delayBetweenEachChunSending);
@@ -167,16 +173,17 @@ jQuery(document).ready($ => {
 
   function sendFileChunk(chunk, successCallback) {
     if (sendDataChannel.bufferedAmount > DATA_CHANNEL_MAX_BUFFER_THRESHOLD) {
-      $('#sendDataChannelStatusTxt').text('DataChannel Buffer Is Full, Waiting...');
+      $("#sendDataChannelStatusTxt").text(
+        "DataChannel Buffer Is Full, Waiting..."
+      );
       setTimeout(() => {
         sendFileChunk(chunk, successCallback);
       }, WAITING_TIME_FOR_DATA_CHANNEL_TO_BE_READY);
       return;
     }
-    $('#sendDataChannelStatusTxt').text('Sending...');
+    $("#sendDataChannelStatusTxt").text("Sending...");
     sendDataChannel.send(chunk);
     successCallback();
-
   }
 
   function displayMsg(msg) {
@@ -245,9 +252,11 @@ jQuery(document).ready($ => {
     }
 
     localConnection = new RTCPeerConnection({
-      iceServers: [{
-        urls: "stun:stun.l.google.com:19302"
-      }]
+      iceServers: [
+        {
+          urls: "stun:stun.l.google.com:19302"
+        }
+      ]
     });
 
     localConnection.ondatachannel = receiveDatachannelCreatedCallback;
@@ -256,8 +265,8 @@ jQuery(document).ready($ => {
     sendDataChannel.onclose = sendDataChannelCloseCallback;
     // sendDataChannel.bufferedAmountLowThreshold = DATA_CHANNEL_MIN_BUFFER_THRESHOLD;
     sendDataChannel.onbufferedamountlow = () => {
-      console.log('low buffer')
-    }
+      console.log("low buffer");
+    };
 
     localConnection.onicecandidate = e => {
       if (e.candidate) {
@@ -286,21 +295,27 @@ jQuery(document).ready($ => {
 
   let receivingStartTime = null;
   let receivingEndTime = null;
-
   function handleReceivedFile(fileData) {
     try {
       let data = JSON.parse(fileData);
       receivingStartTime = performance.now();
       receivedFileMetaData = data;
     } catch (itsNotJson) {
+      receivedBytes += fileData.byteLength;
       receivedFileData.push(fileData);
       // displayMsg(
       //   `Received chunk ${receivedFileData.length} of ${
       //     receivedFileMetaData.numberOfChunks
       //   }`
       // );
-      $('#chunkNumberTxt').html(`Received chunks: ${receivedFileData.length}/${receivedFileMetaData.numberOfChunks}`)
-      if (receivedFileData.length == receivedFileMetaData.numberOfChunks) {
+      $("#chunkNumberTxt").html(
+        `Received chunks: ${receivedFileData.length}/${
+          receivedFileMetaData.numberOfChunks
+        }`
+      );
+      
+      console.log(`receivedBytes: ${receivedBytes}`)
+      if (receivedBytes == receivedFileMetaData.size) {
         fileReceiveEnded();
       }
     }
@@ -309,7 +324,10 @@ jQuery(document).ready($ => {
   function fileReceiveEnded() {
     receivingEndTime = performance.now();
     let tokenTime = (receivingEndTime - receivingStartTime) / 1000;
-    displayMsg(`Time Token For Receving File: ${tokenTime} Second, File Size: ${receivedFileMetaData.size/1024} KB, Speed: ${(receivedFileMetaData.size / 1024)/tokenTime} KB/S`)
+    displayMsg(
+      `Time Token For Receving File: ${tokenTime} Second, File Size: ${receivedFileMetaData.size /
+        1024} KB, Speed: ${receivedFileMetaData.size / 1024 / tokenTime} KB/S`
+    );
     let fileBlob = new Blob(receivedFileData, {
       type: receivedFileMetaData.type
     });
@@ -319,10 +337,11 @@ jQuery(document).ready($ => {
     linkToDownload.innerText =
       "Click Here To Download " + receivedFileMetaData.name;
     $("#resultTxt").append(linkToDownload);
-    $("#resultTxt").append('<br/>');
+    $("#resultTxt").append("<br/>");
 
     receivedFileMetaData = {};
     receivedFileData = [];
+    receivedBytes = 0;
   }
 
   function handleSignalingMsg(msg) {
