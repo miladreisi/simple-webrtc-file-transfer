@@ -145,10 +145,10 @@ jQuery(document).ready($ => {
           if (start > fileToSend.size) {
             $("#sendDataChannelStatusTxt").text("File Sent Successfully");
             endTime = performance.now();
-            let tokenTime = (endTime - startTime) / 1000;
+            let takenTime = (endTime - startTime) / 1000;
             displayMsg(
-              `Time Token For Sending File: ${tokenTime} Second, File Size: ${fileToSend.size /
-                1024} KB, Speed: ${fileToSend.size / 1024 / tokenTime} KB/S`
+              `Time Token For Sending File: ${takenTime} Second, File Size: ${fileToSend.size /
+                1024} KB, Speed: ${fileToSend.size / 1024 / takenTime} KB/S`
             );
             return;
           }
@@ -313,7 +313,7 @@ jQuery(document).ready($ => {
           receivedFileMetaData.numberOfChunks
         }`
       );
-      
+
       console.log(`receivedBytes: ${receivedBytes}`)
       if (receivedBytes == receivedFileMetaData.size) {
         fileReceiveEnded();
@@ -323,10 +323,10 @@ jQuery(document).ready($ => {
 
   function fileReceiveEnded() {
     receivingEndTime = performance.now();
-    let tokenTime = (receivingEndTime - receivingStartTime) / 1000;
+    let takenTime = (receivingEndTime - receivingStartTime) / 1000;
     displayMsg(
-      `Time Token For Receving File: ${tokenTime} Second, File Size: ${receivedFileMetaData.size /
-        1024} KB, Speed: ${receivedFileMetaData.size / 1024 / tokenTime} KB/S`
+      `Time Token For Receving File: ${takenTime} Second, File Size: ${receivedFileMetaData.size /
+        1024} KB, Speed: ${receivedFileMetaData.size / 1024 / takenTime} KB/S`
     );
     let fileBlob = new Blob(receivedFileData, {
       type: receivedFileMetaData.type
